@@ -16,6 +16,20 @@ module.exports = async (req, res) => {
     return res.status(502).json({ error: "Falha ao falar com o serviço de letras." });
   }
 
+  if (!hits.length) {
+    try {
+      const d = (await (await fetch(`https://api.deezer.com/search?limit=5&q=${encodeURIComponent(q)}`)).json()).data || [];
+      return res.status(200).json({ results: d.map((x) => ({
+        title: x.title,
+        artist: x.artist && x.artist.name,
+        album: x.album && x.album.title,
+        cover: x.album && x.album.cover_medium,
+        preview: x.preview,
+        link: x.link,
+      })) });
+    } catch (e) {}
+  }
+
   const results = await Promise.all(hits.slice(0, 5).map(async (t) => {
     const o = { title: t.title, artist: t.primary_artist && t.primary_artist.name, fonte: t.url };
     try {
