@@ -38,3 +38,7 @@ canvas{width:100%;height:90px;display:block}
 .cover{width:56px;height:56px;border-radius:8px;object-fit:cover;background:var(--line)}
 .song audio{width:100%;height:36px;margin-top:10px}
 .song a{display:inline-block;margin-top:8px;font-size:13px;color:var(--acc)}
+.lyr{display:flex;gap:8px;margin-top:14px}
+.lyr input{flex:1;min-width:0;padding:12px;border-radius:12px;border:1px solid var(--line);background:var(--card);color:var(--ink);font-size:15px}
+.lyr button{padding:0 18px;border-radius:12px;border:0;background:var(--ink);color:var(--bg);font-size:15px;cursor:pointer}
+.note a{color:inherit}

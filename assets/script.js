@@ -50,12 +50,15 @@ async function toWav(blob){
 async function send(blob){
   if(Date.now()-t0<3000){st.textContent="Cantarole um pouco mais (uns 8 a 12 segundos).";return}
   st.textContent="Analisando a melodia…";
+  var wav;
+  try{wav=await toWav(blob)}catch(e){st.textContent="Não consegui processar o áudio gravado neste navegador.";return}
   try{
-    var r=await fetch("/api/identify",{method:"POST",headers:{"Content-Type":"application/octet-stream"},body:await toWav(blob)});
-    var j=await r.json();
+    var r=await fetch("/api/identify",{method:"POST",headers:{"Content-Type":"application/octet-stream"},body:wav});
+    var tx=await r.text(),j;
+    try{j=JSON.parse(tx)}catch(e){st.textContent="O servidor respondeu "+r.status+" sem JSON. Confira a pasta api/ e os logs da Vercel.";return}
     if(!r.ok||!j.results||!j.results.length){st.textContent=j.error||"Não encontrei essa música. Tente cantarolar o refrão com mais calma.";return}
     show(j.results);st.textContent="Veja as possibilidades abaixo ou tente de novo";
-  }catch(e){st.textContent="Algo deu errado. Tente novamente."}
+  }catch(e){st.textContent="Falha de rede: "+(e.message||e)}
 }
 
 function show(r){
@@ -70,6 +73,7 @@ function show(r){
     [x.album,x.year].forEach(function(v){if(v){var s=document.createElement("span");s.textContent=v;d.querySelector(".tags").appendChild(s)}});
     if(x.preview&&x.preview.indexOf("https://")===0){var a=document.createElement("audio");a.controls=true;a.preload="none";a.src=x.preview;d.insertBefore(a,d.querySelector(".actions"))}
     if(x.link&&x.link.indexOf("https://")===0){var l=document.createElement("a");l.href=x.link;l.target="_blank";l.rel="noopener";l.textContent="Ouvir no Deezer";d.insertBefore(l,d.querySelector(".actions"))}
+    if(x.fonte&&x.fonte.indexOf("https://")===0){var v=document.createElement("a");v.href=x.fonte;v.target="_blank";v.rel="noopener";v.textContent="Ver letra";v.style.marginLeft="12px";d.insertBefore(v,d.querySelector(".actions"))}
     d.querySelector(".p").onclick=function(){addHist(x);this.textContent="Salva \u2713";this.disabled=true};
     list.appendChild(d);
   });
@@ -87,3 +91,16 @@ function addHist(x){
     h.appendChild(d);
   });
 }
+
+document.getElementById("qb").onclick=async function(){
+  var q=document.getElementById("q").value.trim();
+  if(q.length<4){st.textContent="Digite um trecho um pouco maior da letra.";return}
+  st.textContent="Buscando pela letra…";
+  try{
+    var r=await fetch("/api/letra?q="+encodeURIComponent(q)),tx=await r.text(),j;
+    try{j=JSON.parse(tx)}catch(e){st.textContent="O servidor respondeu "+r.status+" sem JSON. Confira a pasta api/ e os logs da Vercel.";return}
+    if(!r.ok||!j.results||!j.results.length){st.textContent=j.error||"Não achei músicas com esse trecho.";return}
+    show(j.results);st.textContent="Veja as possibilidades abaixo";
+  }catch(e){st.textContent="Falha de rede: "+(e.message||e)}
+};
+document.getElementById("q").addEventListener("keydown",function(e){if(e.key==="Enter")document.getElementById("qb").click()});
