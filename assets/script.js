@@ -1,3 +1,4 @@
+var cur={mode:"",query:"",lista:[]};
 var cv=document.getElementById("cv"),cx=cv.getContext("2d"),mic=document.getElementById("mic"),st=document.getElementById("status"),res=document.getElementById("res"),list=document.getElementById("list"),hist=[];
 var rec=null,chunks=[],level=0,listening=false,timer=null,t0=0;
 
@@ -56,16 +57,17 @@ async function send(blob){
     var r=await fetch("/api/identify",{method:"POST",headers:{"Content-Type":"application/octet-stream"},body:wav});
     var tx=await r.text(),j;
     try{j=JSON.parse(tx)}catch(e){st.textContent="O servidor respondeu "+r.status+" sem JSON. Confira a pasta api/ e os logs da Vercel.";return}
-    if(!r.ok||!j.results||!j.results.length){st.textContent=j.error||"Não encontrei essa música. Tente cantarolar o refrão com mais calma.";return}
-    show(j.results);st.textContent="Veja as possibilidades abaixo ou tente de novo";
+    if(!r.ok||!j.results||!j.results.length){st.textContent=j.error||"Não encontrei essa música. Tente cantarolar o refrão com mais calma.";if(r.ok)show([],"melodia","");return}
+    show(j.results,"melodia","");st.textContent="Veja as possibilidades abaixo ou tente de novo";
   }catch(e){st.textContent="Falha de rede: "+(e.message||e)}
 }
 
-function show(r){
+function show(r,mode,query){
+  cur={mode:mode,query:query||"",lista:r.map(function(x){return (x.title||"")+" - "+(x.artist||"")})};
   list.innerHTML="";
   r.forEach(function(x){
     var d=document.createElement("div");d.className="song";
-    d.innerHTML='<div class="mrow"><img class="cover" alt=""><div><div class="t"></div><div class="a"></div></div></div><div class="tags"></div><div class="actions"><button class="p">Salvar</button></div>';
+    d.innerHTML='<div class="mrow"><img class="cover" alt=""><div><div class="t"></div><div class="a"></div></div></div><div class="tags"></div><div class="actions"><button class="ok">É essa</button><button class="p">Salvar</button></div>';
     d.querySelector(".t").textContent=x.title||"";
     d.querySelector(".a").textContent=x.artist||"";
     var img=d.querySelector(".cover");
@@ -74,10 +76,21 @@ function show(r){
     if(x.preview&&x.preview.indexOf("https://")===0){var a=document.createElement("audio");a.controls=true;a.preload="none";a.src=x.preview;d.insertBefore(a,d.querySelector(".actions"))}
     if(x.link&&x.link.indexOf("https://")===0){var l=document.createElement("a");l.href=x.link;l.target="_blank";l.rel="noopener";l.textContent="Ouvir no Deezer";d.insertBefore(l,d.querySelector(".actions"))}
     if(x.fonte&&x.fonte.indexOf("https://")===0){var v=document.createElement("a");v.href=x.fonte;v.target="_blank";v.rel="noopener";v.textContent="Ver letra";v.style.marginLeft="12px";d.insertBefore(v,d.querySelector(".actions"))}
+    d.querySelector(".ok").onclick=function(){feedback("acertou",(x.title||"")+" - "+(x.artist||""),"");this.textContent="Valeu! \u2713";this.disabled=true};
     d.querySelector(".p").onclick=function(){addHist(x);this.textContent="Salva \u2713";this.disabled=true};
     list.appendChild(d);
   });
+  var old=res.querySelector(".fb");if(old)old.remove();
+  var fb=document.createElement("div");fb.className="fb";
+  fb.innerHTML='<button class="none">Nenhuma dessas</button><div class="ask" style="display:none"><input type="text" maxlength="120" placeholder="Qual era a música? (opcional)"><button class="send">Enviar</button></div>';
+  fb.querySelector(".none").onclick=function(){this.style.display="none";fb.querySelector(".ask").style.display="flex"};
+  fb.querySelector(".send").onclick=function(){feedback("nenhuma","",fb.querySelector("input").value);fb.textContent="Obrigado! Isso ajuda a melhorar o app."};
+  res.appendChild(fb);
   res.style.display="block";
+}
+
+function feedback(resultado,escolhida,esperada){
+  fetch("/api/feedback",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({modo:cur.mode,consulta:cur.query,resultado:resultado,escolhida:escolhida,esperada:esperada,lista:cur.lista})}).catch(function(){});
 }
 
 function addHist(x){
@@ -99,8 +112,8 @@ document.getElementById("qb").onclick=async function(){
   try{
     var r=await fetch("/api/letra?q="+encodeURIComponent(q)),tx=await r.text(),j;
     try{j=JSON.parse(tx)}catch(e){st.textContent="O servidor respondeu "+r.status+" sem JSON. Confira a pasta api/ e os logs da Vercel.";return}
-    if(!r.ok||!j.results||!j.results.length){st.textContent=j.error||"Não achei músicas com esse trecho.";return}
-    show(j.results);st.textContent="Veja as possibilidades abaixo";
+    if(!r.ok||!j.results||!j.results.length){st.textContent=j.error||"Não achei músicas com esse trecho.";if(r.ok)show([],"letra",q);return}
+    show(j.results,"letra",q);st.textContent="Veja as possibilidades abaixo";
   }catch(e){st.textContent="Falha de rede: "+(e.message||e)}
 };
 document.getElementById("q").addEventListener("keydown",function(e){if(e.key==="Enter")document.getElementById("qb").click()});
