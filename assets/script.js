@@ -1,10 +1,5 @@
-var DB=[
-{t:"Garota de Ipanema",a:"Tom Jobim e Vinicius de Moraes",y:1962,g:"Bossa nova",f:"Composta no Rio e regravada no mundo todo; uma das canções brasileiras mais tocadas da história."},
-{t:"Asa Branca",a:"Luiz Gonzaga e Humberto Teixeira",y:1947,g:"Baião",f:"Retrata a seca do sertão nordestino e virou um hino do baião."},
-{t:"Águas de Março",a:"Tom Jobim",y:1972,g:"MPB / Bossa nova",f:"Letra feita de imagens encadeadas, sem refrão tradicional."}
-];
-var cv=document.getElementById("cv"),cx=cv.getContext("2d"),mic=document.getElementById("mic"),st=document.getElementById("status");
-var listening=false,level=0,raf,stream=null,analyser=null,hist=[];
+var cv=document.getElementById("cv"),cx=cv.getContext("2d"),mic=document.getElementById("mic"),st=document.getElementById("status"),res=document.getElementById("res"),list=document.getElementById("list"),hist=[];
+var rec=null,chunks=[],level=0,listening=false,timer=null,t0=0;
 
 function draw(t){
   cx.clearRect(0,0,cv.width,cv.height);
@@ -15,70 +10,80 @@ function draw(t){
     cx.fillStyle=cs;cx.globalAlpha=listening?1:.35;
     cx.fillRect(i*w+2,(cv.height-h)/2,w-4,h);
   }
-  raf=requestAnimationFrame(draw);
+  requestAnimationFrame(draw);
 }
-raf=requestAnimationFrame(draw);
+requestAnimationFrame(draw);
 
 async function start(){
-  if(listening)return;
-  listening=true;level=0.4;mic.classList.add("on");
-  document.getElementById("res").style.display="none";
-  st.textContent="Ouvindo… cantarole agora";
-  try{
-    stream=await navigator.mediaDevices.getUserMedia({audio:true});
-    var ac=new (window.AudioContext||window.webkitAudioContext)();
-    analyser=ac.createAnalyser();analyser.fftSize=256;
-    ac.createMediaStreamSource(stream).connect(analyser);
-  }catch(e){analyser=null;}
-  var buf=analyser?new Uint8Array(analyser.fftSize):null;
-  var iv=setInterval(function(){
-    if(analyser){analyser.getByteTimeDomainData(buf);var s=0;for(var i=0;i<buf.length;i++){var v=(buf[i]-128)/128;s+=v*v}level=Math.min(1,Math.sqrt(s/buf.length)*5)}
-    else level=0.3+Math.random()*0.5;
-  },80);
-  setTimeout(function(){
-    clearInterval(iv);
-    if(stream){stream.getTracks().forEach(function(t){t.stop()});stream=null}
-    finish();
-  },4500);
+  var stream;
+  try{stream=await navigator.mediaDevices.getUserMedia({audio:true})}
+  catch(e){st.textContent="Preciso da permissão do microfone para ouvir.";return}
+  var ac=new (window.AudioContext||window.webkitAudioContext)(),an=ac.createAnalyser();
+  an.fftSize=256;ac.createMediaStreamSource(stream).connect(an);
+  var buf=new Uint8Array(an.fftSize);
+  var iv=setInterval(function(){an.getByteTimeDomainData(buf);var s=0;for(var i=0;i<buf.length;i++){var v=(buf[i]-128)/128;s+=v*v}level=Math.min(1,Math.sqrt(s/buf.length)*5)},80);
+  chunks=[];rec=new MediaRecorder(stream);
+  rec.ondataavailable=function(e){chunks.push(e.data)};
+  rec.onstop=function(){clearInterval(iv);stream.getTracks().forEach(function(t){t.stop()});ac.close();send(new Blob(chunks,{type:rec.mimeType}))};
+  rec.start();listening=true;t0=Date.now();mic.classList.add("on");res.style.display="none";
+  st.textContent="Ouvindo… toque de novo quando terminar";
+  timer=setTimeout(stop,12000);
+}
+function stop(){
+  clearTimeout(timer);
+  if(rec&&rec.state==="recording"){listening=false;level=0;mic.classList.remove("on");rec.stop()}
+}
+mic.onclick=function(){listening?stop():start()};
+
+async function toWav(blob){
+  var ac=new (window.AudioContext||window.webkitAudioContext)();
+  var b=await ac.decodeAudioData(await blob.arrayBuffer());ac.close();
+  var oc=new OfflineAudioContext(1,Math.ceil(b.duration*16000),16000),src=oc.createBufferSource();
+  src.buffer=b;src.connect(oc.destination);src.start();
+  var d=(await oc.startRendering()).getChannelData(0),o=new DataView(new ArrayBuffer(44+d.length*2));
+  function w(p,s){for(var i=0;i<s.length;i++)o.setUint8(p+i,s.charCodeAt(i))}
+  w(0,"RIFF");o.setUint32(4,36+d.length*2,true);w(8,"WAVEfmt ");o.setUint32(16,16,true);o.setUint16(20,1,true);o.setUint16(22,1,true);o.setUint32(24,16000,true);o.setUint32(28,32000,true);o.setUint16(32,2,true);o.setUint16(34,16,true);w(36,"data");o.setUint32(40,d.length*2,true);
+  for(var i=0;i<d.length;i++)o.setInt16(44+i*2,Math.max(-1,Math.min(1,d[i]))*32767,true);
+  return new Blob([o],{type:"audio/wav"});
 }
 
-function finish(){
-  listening=false;mic.classList.remove("on");level=0;
-  st.textContent="Analisando melodia e ritmo…";
-  setTimeout(function(){
-    var order=DB.slice().sort(function(){return Math.random()-.5});
-    var pcts=[93,61,38];
-    show(order.map(function(s){return {s:s}}));
-    st.textContent="Veja as possibilidades abaixo ou toque no microfone para tentar de novo";
-  },1200);
+async function send(blob){
+  if(Date.now()-t0<3000){st.textContent="Cantarole um pouco mais (uns 8 a 12 segundos).";return}
+  st.textContent="Analisando a melodia…";
+  try{
+    var r=await fetch("/api/identify",{method:"POST",headers:{"Content-Type":"application/octet-stream"},body:await toWav(blob)});
+    var j=await r.json();
+    if(!r.ok||!j.results||!j.results.length){st.textContent=j.error||"Não encontrei essa música. Tente cantarolar o refrão com mais calma.";return}
+    show(j.results);st.textContent="Veja as possibilidades abaixo ou tente de novo";
+  }catch(e){st.textContent="Algo deu errado. Tente novamente."}
 }
 
 function show(r){
-  var el=document.getElementById("list");el.innerHTML="";
+  list.innerHTML="";
   r.forEach(function(x){
     var d=document.createElement("div");d.className="song";
-    d.innerHTML='<div class="t"></div><div class="a"></div>'+
-      '<div class="tags"><span class="y"></span><span class="g"></span></div>'+
-      '<p class="fact"></p><div class="actions"><button class="p">Salvar</button></div>';
-    d.querySelector(".t").textContent=x.s.t;
-    d.querySelector(".a").textContent=x.s.a;
-    d.querySelector(".y").textContent=x.s.y;
-    d.querySelector(".g").textContent=x.s.g;
-    d.querySelector(".fact").textContent=x.s.f;
-    d.querySelector(".p").onclick=function(){addHist(x.s);this.textContent="Salva \u2713";this.disabled=true};
-    el.appendChild(d);
+    d.innerHTML='<div class="mrow"><img class="cover" alt=""><div><div class="t"></div><div class="a"></div></div></div><div class="tags"></div><div class="actions"><button class="p">Salvar</button></div>';
+    d.querySelector(".t").textContent=x.title||"";
+    d.querySelector(".a").textContent=x.artist||"";
+    var img=d.querySelector(".cover");
+    if(x.cover&&x.cover.indexOf("https://")===0)img.src=x.cover;else img.style.display="none";
+    [x.album,x.year].forEach(function(v){if(v){var s=document.createElement("span");s.textContent=v;d.querySelector(".tags").appendChild(s)}});
+    if(x.preview&&x.preview.indexOf("https://")===0){var a=document.createElement("audio");a.controls=true;a.preload="none";a.src=x.preview;d.insertBefore(a,d.querySelector(".actions"))}
+    if(x.link&&x.link.indexOf("https://")===0){var l=document.createElement("a");l.href=x.link;l.target="_blank";l.rel="noopener";l.textContent="Ouvir no Deezer";d.insertBefore(l,d.querySelector(".actions"))}
+    d.querySelector(".p").onclick=function(){addHist(x);this.textContent="Salva \u2713";this.disabled=true};
+    list.appendChild(d);
   });
-  document.getElementById("res").style.display="block";
+  res.style.display="block";
 }
 
-function addHist(s){
-  hist.unshift(s);
+function addHist(x){
+  hist.unshift(x);
   var h=document.getElementById("hist");h.innerHTML="";
-  hist.forEach(function(x){
+  hist.forEach(function(y){
     var d=document.createElement("div");d.className="song";
     d.innerHTML='<div class="t"></div><div class="a"></div>';
-    d.querySelector(".t").textContent=x.t;d.querySelector(".a").textContent=x.a+" · "+x.y;
+    d.querySelector(".t").textContent=y.title||"";
+    d.querySelector(".a").textContent=(y.artist||"")+(y.year?" · "+y.year:"");
     h.appendChild(d);
   });
 }
-mic.addEventListener("click",start);
